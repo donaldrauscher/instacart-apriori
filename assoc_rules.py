@@ -1,5 +1,5 @@
 import apache_beam as beam
-from io.bq import makeBigQuerySink
+from beamio.bq import makeBigQuerySink
 
 # functions for building and formating association rules
 def buildARuleNum(x):
@@ -16,9 +16,10 @@ def buildARuleDenom(x):
     return (makeItemSetKey(x[0]), {'conf_denom':x[1]})
 
 def formatARule(x):
-    lhs, rhs, conf = x[0], x[1]['rhs'], float(x[1]['conf_num']) / float(x[1]['conf_denom'])
+    lhs, rhs = x[0], x[1]['rhs']
+    supp, conf = x[1]['conf_num'], float(x[1]['conf_num']) / float(x[1]['conf_denom'])
     lhs = tuple([int(i) for i in lhs.split('_')])
-    return (lhs, rhs, conf)
+    return (lhs, rhs, supp, conf)
 
 # builds and runs pipeline
 def run(config):
@@ -47,17 +48,18 @@ def run(config):
         | 'FilterMerge' >> beam.Filter(lambda x: len(x[1]['num']) > 0)
         | 'ProcessMerge' >> beam.Map(lambda x: (x[0], dict(x[1]['num'][0].items() + x[1]['denom'][0].items())))
         | 'FormatRules' >> beam.Map(formatARule)
-        | 'FilterConf' >> beam.Filter(lambda x: x[2] > config['conf_cutoff']))
+        | 'FilterConf' >> beam.Filter(lambda x: x[3] > config['conf_cutoff']))
 
     # export
     schema = {
         'lhs': {'name': 'lhs', 'type': 'integer', 'mode': 'repeated'},
         'rhs': {'name': 'rhs', 'type': 'integer', 'mode': 'required'},
+        'supp': {'name': 'supp', 'type': 'integer', 'mode': 'required'},
         'conf': {'name': 'conf', 'type': 'float', 'mode': 'required'}
     }
 
     arules = (arules
-        | 'ExportPrep' >> beam.Map(lambda x: {'lhs':x[0], 'rhs':x[1], 'conf':x[2]})
+        | 'ExportPrep' >> beam.Map(lambda x: {'lhs': x[0], 'rhs': x[1], 'supp': x[2], 'conf': x[3]})
         | 'Export' >> beam.io.Write(makeBigQuerySink("instacart.assoc_rules", schema)))
 
     # run

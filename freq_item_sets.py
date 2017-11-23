@@ -1,5 +1,5 @@
 import apache_beam as beam
-from io.bq import makeBigQuerySink
+from beamio.bq import makeBigQuerySink
 
 # normalizes an order stored in an array
 def normalize(order):
