@@ -1,4 +1,5 @@
 import apache_beam as beam
+from io.bq import makeBigQuerySink
 
 # functions for building and formating association rules
 def buildARuleNum(x):
@@ -18,26 +19,6 @@ def formatARule(x):
     lhs, rhs, conf = x[0], x[1]['rhs'], float(x[1]['conf_num']) / float(x[1]['conf_denom'])
     lhs = tuple([int(i) for i in lhs.split('_')])
     return (lhs, rhs, conf)
-
-# creates BigQuery sink
-def makeBigQuerySink(output, schema):
-    from apache_beam.io.gcp.internal.clients import bigquery
-
-    def makeTableFieldSchema(**kwargs):
-        field = bigquery.TableFieldSchema()
-        for k,v in kwargs.items():
-            field.__setattr__(k,v)
-        return field
-
-    table_schema = bigquery.TableSchema()
-    for k,v in schema.items():
-        table_schema.fields.append(makeTableFieldSchema(**v))
-
-    return beam.io.BigQuerySink(
-        output,
-        schema = table_schema,
-        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
-        write_disposition = beam.io.BigQueryDisposition.WRITE_TRUNCATE)
 
 # builds and runs pipeline
 def run(config):
@@ -65,7 +46,7 @@ def run(config):
         | 'Merge' >> beam.CoGroupByKey()
         | 'FilterMerge' >> beam.Filter(lambda x: len(x[1]['num']) > 0)
         | 'ProcessMerge' >> beam.Map(lambda x: (x[0], dict(x[1]['num'][0].items() + x[1]['denom'][0].items())))
-        | 'Format' >> beam.Map(formatARule)
+        | 'FormatRules' >> beam.Map(formatARule)
         | 'FilterConf' >> beam.Filter(lambda x: x[2] > config['conf_cutoff']))
 
     # export
