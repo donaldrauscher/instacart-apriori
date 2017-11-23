@@ -18,6 +18,26 @@ def extractCombos(order, size):
     for s in subsets:
         yield (s, 1)
 
+# creates BigQuery sink
+def makeBigQuerySink(output, schema):
+    from apache_beam.io.gcp.internal.clients import bigquery
+
+    def makeTableFieldSchema(**kwargs):
+        field = bigquery.TableFieldSchema()
+        for k,v in kwargs.items():
+            field.__setattr__(k,v)
+        return field
+
+    table_schema = bigquery.TableSchema()
+    for k,v in schema.items():
+        table_schema.fields.append(makeTableFieldSchema(**v))
+
+    return beam.io.BigQuerySink(
+        output,
+        schema = table_schema,
+        create_disposition = beam.io.BigQueryDisposition.CREATE_IF_NEEDED,
+        write_disposition = beam.io.BigQueryDisposition.WRITE_TRUNCATE)
+
 # builds and runs pipeline
 def run(config):
 
@@ -25,7 +45,7 @@ def run(config):
     runner = "DataflowRunner"
     #runner = "DirectRunner"
     pipeline =  beam.Pipeline(runner = runner, argv = [
-       "--job_name", "instacart-apriori",
+       "--job_name", "instacart-freq-item-sets",
        "--project", config['project'],
        "--staging_location", config['staging_location'],
        "--temp_location", config['temp_location']
@@ -70,10 +90,17 @@ def run(config):
         | 'Count3' >> beam.CombinePerKey(sum)
         | 'Filter3' >> beam.Filter(lambda x: x[1] >= config['supp_cutoff']))
 
-    # extract itemsets
+    # concatenate all item sets and export to BigQuery
+    schema = {
+        'products': {'name': 'products', 'type': 'integer', 'mode': 'repeated'},
+        'frequency': {'name': 'frequency', 'type': 'integer', 'mode': 'required'}
+    }
+
     all_freq = ((freq1, freq2, freq3)
         | 'Flatten' >> beam.Flatten()
-        | 'Export' >> beam.io.WriteToText(config['output_prefix']))
+        | 'ExportPrep' >> beam.Map(lambda x: {'products' : x[0], 'frequency' : x[1]})
+        | 'Export' >> beam.io.Write(makeBigQuerySink("instacart.freq_item_sets", schema))
+    )
 
     # run
     pipeline.run()
